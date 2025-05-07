@@ -62,6 +62,10 @@ git clone --depth 1 --no-checkout "%repo_url%" "!temp_repo!" || (
 )
 pushd "!temp_repo!"
 
+:: 🔧 新增：关闭 NTFS 路径保护
+git config core.protectNTFS false
+powershell -Command "Write-Output 'Git NTFS 路径保护已关闭（core.protectNTFS = false）'"
+
 :: 调试：显示当前目录和 Git 配置
 powershell -Command "Write-Output ('当前目录: {0}' -f (Get-Location).Path)"
 powershell -Command "Write-Output '检查 Git 配置...'"

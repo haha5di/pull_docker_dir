@@ -1,8 +1,9 @@
 @echo off
 setlocal enabledelayedexpansion
 
-:: 设置 CMD 代码页为 UTF-8
+:: 强制设置 UTF-8 编码环境
 chcp 65001 >nul
+powershell -Command "$OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding" >nul
 
 :: 从文件名中提取参数
 set "script_name=%~n0"
@@ -18,86 +19,109 @@ for /f "tokens=1-4 delims=_" %%a in ("%script_name%") do (
 
 :: 验证参数是否正确
 if not defined target_folder_name (
-    echo 错误：文件名格式不正确，无法提取目标文件夹名称。
+    powershell -Command "Write-Output '错误：文件名格式不正确，无法提取目标文件夹名称。'"
     goto :error
 )
 if not defined user_name (
-    echo 错误：文件名格式不正确，无法提取用户名。
+    powershell -Command "Write-Output '错误：文件名格式不正确，无法提取用户名。'"
     goto :error
 )
 if not defined repo_name (
-    echo 错误：文件名格式不正确，无法提取仓库名称。
+    powershell -Command "Write-Output '错误：文件名格式不正确，无法提取仓库名称。'"
     goto :error
 )
 
 set "repo_url=https://github.com/%user_name%/%repo_name%.git"
-echo 使用的仓库地址: %repo_url%
-echo 目标文件夹: %target_folder_name%
+powershell -Command "Write-Output ('使用的仓库地址: {0}' -f '%repo_url%')"
+powershell -Command "Write-Output ('目标文件夹: {0}' -f '%target_folder_name%')"
 
-:: 创建带时间戳的文件夹
-for /f "tokens=1-6 delims=/:-. " %%a in ('powershell -Command "(Get-Date).ToString('yyyyMMddHHmmss')"' ) do (
-  set "timestamp=%%a%%b%%c%%d%%e%%f"
-)
-
+:: 创建带时间戳的文件夹（保留原功能）
 set "output_folder=!repo_name!_!target_folder_name!"
 if not exist "!output_folder!" (
     mkdir "!output_folder!" || (
-        echo 创建输出文件夹失败："!output_folder!"
+        powershell -Command "Write-Output ('创建输出文件夹失败：{0}' -f '!output_folder!')"
         goto :error
     )
 ) else (
-    echo 文件夹 "!output_folder!" 已存在，将使用现有文件夹。
+    powershell -Command "Write-Output ('文件夹 {0} 已存在，将使用现有文件夹。' -f '!output_folder!')"
 )
-echo 使用的输出文件夹："!output_folder!"
+powershell -Command "Write-Output ('使用的输出文件夹：{0}' -f '!output_folder!')"
 
 :: 忽略 SSL 验证
 git config --global http.sslVerify false
-echo 忽略 SSL 验证
+powershell -Command "Write-Output '忽略 SSL 验证'"
 
 :: 下载仓库中的指定文件夹
-set "temp_repo=temp_repo_!timestamp!"
-echo 正在克隆仓库...
-git clone --depth 1 --sparse "%repo_url%" "!temp_repo!" || (
-  echo 克隆仓库失败
+:: 修改：生成包含毫秒和随机数的临时文件夹名称
+for /f "delims=" %%i in ('powershell -Command " 'temp_repo_' + (Get-Date).ToString('yyyyMMddHHmmssfff') + '_' + (Get-Random -Minimum 10000 -Maximum 99999) "') do set "temp_repo=%%i"
+
+powershell -Command "Write-Output '正在克隆仓库...'"
+git clone --depth 1 --no-checkout "%repo_url%" "!temp_repo!" || (
+  powershell -Command "Write-Output '克隆仓库失败'"
   goto :reset_ssl
 )
 pushd "!temp_repo!"
-echo 正在设置稀疏检出...
+
+:: 调试：显示当前目录和 Git 配置
+powershell -Command "Write-Output ('当前目录: {0}' -f (Get-Location).Path)"
+powershell -Command "Write-Output '检查 Git 配置...'"
+git config --list | findstr sparse-checkout >nul
+powershell -Command "Write-Output ''"
+
+:: 设置稀疏检出
+powershell -Command "Write-Output '正在设置稀疏检出...'"
+git sparse-checkout init --cone
 git sparse-checkout set "%target_folder_name%" || (
-  echo 设置稀疏检出失败
+  powershell -Command "Write-Output '设置稀疏检出失败'"
   goto :cleanup_temp
 )
-echo 正在检出主分支...
-git checkout main || (
-  echo 检出主分支失败
+
+:: 检出分支（优先使用 master 分支）
+powershell -Command "Write-Output '正在检出 master 分支...'"
+git checkout master || (
+  powershell -Command "Write-Output '检出 master 分支失败。尝试切换到 main 分支...'"
+  git checkout main || (
+    powershell -Command "Write-Output '检出分支失败（main 和 master 均不存在）'"
+    goto :cleanup_temp
+  )
+)
+
+:: 验证检出内容
+powershell -Command "Write-Output ('检出后的内容（路径 {0}）：' -f '%target_folder_name%')"
+powershell -Command "Get-ChildItem -Path '%target_folder_name%' -Recurse | Select-Object -ExpandProperty FullName"
+powershell -Command "Write-Output ''"
+
+:: 验证源路径是否存在
+if not exist "%target_folder_name%" (
+  powershell -Command "Write-Output ('错误：源路径 {0} 不存在！' -f '%target_folder_name%')"
   goto :cleanup_temp
 )
-echo 正在复制文件夹内容...
+
+:: 复制文件
+powershell -Command "Write-Output '正在复制文件夹内容...'"
 xcopy "%target_folder_name%" "..\\!output_folder!" /E /I /Y || (
-  echo 复制文件夹内容失败
+  powershell -Command "Write-Output '复制文件夹内容失败'"
   goto :cleanup_temp
 )
 popd
-echo 仓库的 "%target_folder_name%" 文件夹已下载到 "!output_folder!"
+powershell -Command "Write-Output ('仓库的 {0} 文件夹已下载到 {1}' -f '%target_folder_name%', '!output_folder!')"
 
 :: 清理临时仓库
 :cleanup_temp
 rmdir /s /q "!temp_repo!" >nul
-echo 已移除临时仓库
-
-:: 保持 CMD 窗口打开
-echo. 按 Enter 键退出...
-pause >nul
+powershell -Command "Write-Output '已移除临时仓库'"
+goto :error
 
 :: 重置 SSL 验证设置
 :reset_ssl
 git config --global http.sslVerify true
+goto :error
 
+:error
+powershell -Command "Write-Output '请检查错误并重试。'"
+:: 保持控制台窗口打开
+powershell -Command "Write-Output '按 Enter 键退出...'"
+pause >nul
 :end
 endlocal
 exit /b 0
-
-:error
-echo. 请检查错误并重试。
-pause
-goto :end
